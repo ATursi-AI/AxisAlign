@@ -46,7 +46,9 @@ if uploaded_file:
         width=canvas_w,
         drawing_mode=mode_map[draw_mode],
         point_display_radius=6,
-        key=fixed_key  # Fixed key prevents the flickering loop
+        key=fixed_key,
+        display_toolbar=True, # Added this to force UI visibility
+        background_color="#EEEEEE", # Added a light gray backdrop
     )
 
     # 5. Data Processing
