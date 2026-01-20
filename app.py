@@ -50,7 +50,7 @@ if uploaded_file:
         key=fixed_key,
         display_toolbar=True,
     )
-    )
+    
 
     # 5. Data Processing
     if canvas_result.json_data is not None:
