@@ -36,70 +36,76 @@ if st.sidebar.button("Reset Data"):
 uploaded_file = st.file_uploader("Upload Radiograph", type=["png", "jpg", "jpeg"])
 
 if uploaded_file:
+    # Load Image
     img = Image.open(uploaded_file).convert("RGB")
     w, h = img.size
     
-    # Robust Scaling Math
+    # Scaling Logic
     canvas_w = 800
     ratio = canvas_w / w
     canvas_h = int(h * ratio)
     
-    # Safety Check: Ensure canvas isn't invisible
-    if canvas_h < 100: canvas_h = 600 
+    st.info(f"📐 Resolution: {w}x{h} | Scaling to: {canvas_w}x{canvas_h}")
 
-    st.info(f"📐 Resolution: {w}x{h} | Displaying at: {canvas_w}x{canvas_h}")
+    # THE FIX: Create a unique key for the canvas based on the file and state
+    # This prevents the "blank canvas" caching bug
+    canvas_key = f"canvas_{uploaded_file.name}_{mode}"
 
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 165, 0, 0.3)",
-        stroke_width=2,
-        stroke_color="#FFFF00",
-        background_image=img,
-        update_streamlit=True,
-        height=canvas_h,
-        width=canvas_w,
-        drawing_mode=mode_map[draw_mode],
-        point_display_radius=5,
-        key="axis_align_canvas_v1",
-    )
+    with st.spinner("Initializing Canvas..."):
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 165, 0, 0.3)",
+            stroke_width=2,
+            stroke_color="#FFFF00",
+            background_image=img,
+            update_streamlit=True,
+            height=canvas_h,
+            width=canvas_w,
+            drawing_mode=mode_map[draw_mode],
+            point_display_radius=6,
+            key=canvas_key,
+        )
 
-    # Handle Data
+    # Handle Data Extraction
     if canvas_result.json_data is not None:
         objs = canvas_result.json_data["objects"]
         all_pts = [(obj["left"], obj["top"]) for obj in objs if obj["type"] == "circle"]
         
-        # Split Calibration (first 2) from Landmarks
+        # 1. Calibration (First 2 points)
         st.session_state.cal_points = all_pts[:2]
+        
+        # 2. Anatomical Landmarks (Everything after point 2)
         st.session_state.landmarks = all_pts[2:]
 
-        # Calibration Logic
+        # Perform Calibration
         if len(st.session_state.cal_points) == 2 and st.session_state.mm_per_pixel is None:
             p1, p2 = st.session_state.cal_points[0], st.session_state.cal_points[1]
             st.session_state.mm_per_pixel = ortho_math.calculate_mm_pixel_ratio(p1, p2, known_mm)
 
-        # 🔍 Precision Loupe Logic
+        # 🔍 Precision Loupe
         if len(objs) > 0:
             st.sidebar.markdown("---")
             st.sidebar.header("🔍 Precision Loupe")
             last_obj = objs[-1]
+            # Map canvas coords back to original image resolution for the crop
             lx, ly = int(last_obj["left"] / ratio), int(last_obj["top"] / ratio)
-            zoom = 60
+            zoom = 70
             roi = img.crop((max(0, lx-zoom), max(0, ly-zoom), min(w, lx+zoom), min(h, ly+zoom)))
-            st.sidebar.image(roi, caption="Targeting Accuracy", use_container_width=True)
+            st.sidebar.image(roi, caption="Pixel-Level Placement", use_container_width=True)
 
     # 📊 Analysis and Simulation
     target_list = LANDMARK_MODES[mode]
     current_count = len(st.session_state.landmarks)
     
-    st.write(f"**Points Placed:** {current_count} / {len(target_list)}")
+    st.write(f"**Anatomical Landmarks Placed:** {current_count} / {len(target_list)}")
     
     if current_count == len(target_list):
         st.divider()
         results = ortho_math.run_analysis(mode, st.session_state.landmarks)
         
-        # Simulation Controls
-        correction = st.sidebar.slider("Simulate Correction (Deg)", -15.0, 15.0, 0.0)
+        # Simulation
+        correction = st.sidebar.slider("Apply Correction (Deg)", -15.0, 15.0, 0.0)
         
-        st.write("### 📈 Analysis Results")
+        st.write("### 📈 Analysis & Simulation")
         c1, c2, c3 = st.columns(3)
         
         pre_hka = results.get('HKA', 180.0)
@@ -109,23 +115,30 @@ if uploaded_file:
         c2.metric("Simulated HKA", f"{sim_hka:.2f}°", delta=f"{correction}°")
         
         if st.session_state.mm_per_pixel:
-            # Estimate wedge based on distance between Femoral Condyles (Points 3 and 4)
+            # Calculation based on Bone Width (using landmarks 3 and 4)
             p_lat, p_med = st.session_state.landmarks[3], st.session_state.landmarks[4]
             px_width = np.linalg.norm(np.array(p_lat) - np.array(p_med))
             wedge_mm = ortho_math.calculate_wedge_height(px_width, abs(correction), st.session_state.mm_per_pixel)
             c3.metric("Wedge Height", f"{wedge_mm:.2f} mm")
 
-        # Visual Overlay
+        # Visual Plotting
         fig, ax = plt.subplots()
         ax.imshow(img)
         pts = st.session_state.landmarks
         
-        # Original Axis (Yellow)
-        ax.plot([pts[0][0]/ratio, pts[1][0]/ratio], [pts[0][1]/ratio, pts[1][1]/ratio], color='yellow', alpha=0.4, label='Original')
+        # Current Axis (Dashed Yellow)
+        ax.plot([pts[0][0]/ratio, pts[1][0]/ratio], [pts[0][1]/ratio, pts[1][1]/ratio], color='yellow', linestyle='--', alpha=0.6)
         
-        # Simulated Axis (Lime)
+        # Predicted Axis (Solid Green)
         s_pts = ortho_math.get_rotated_points(pts, 1, correction)
-        ax.plot([s_pts[0][0]/ratio, s_pts[1][0]/ratio], [s_pts[0][1]/ratio, s_pts[1][1]/ratio], color='#32CD32', linewidth=2, label='Simulated')
+        ax.plot([s_pts[0][0]/ratio, s_pts[1][0]/ratio], [s_pts[0][1]/ratio, s_pts[1][1]/ratio], color='#00FF00', linewidth=2)
         
         ax.axis('off')
         st.pyplot(fig)
+
+        # Optional PDF Export
+        st.sidebar.markdown("---")
+        if st.sidebar.button("📄 Prepare Surgical Passport"):
+            import exporter
+            pdf_data = exporter.generate_surgical_report(mode, results, sim_hka, wedge_mm if 'wedge_mm' in locals() else 0.0)
+            st.sidebar.download_button("📥 Download PDF", data=pdf_data, file_name="Surgical_Plan.pdf", mime="application/pdf")
