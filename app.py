@@ -36,6 +36,7 @@ if uploaded_file:
     st.write(f"📐 Image Dimensions: {w}x{h}")
 
     # THE STABLE CANVAS
+    # THE REFINED CANVAS
     canvas_result = st_canvas(
         fill_color="rgba(255, 165, 0, 0.3)",
         stroke_width=2,
@@ -47,8 +48,8 @@ if uploaded_file:
         drawing_mode=mode_map[draw_mode],
         point_display_radius=6,
         key=fixed_key,
-        display_toolbar=True, # Added this to force UI visibility
-        background_color="#EEEEEE", # Added a light gray backdrop
+        display_toolbar=True,
+    )
     )
 
     # 5. Data Processing
